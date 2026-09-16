@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# Watch for process crashes and route clicks through the plugin dispatcher.
+
+set -uo pipefail
+
+readonly COREDUMP_MESSAGE_ID=fc2e22bc6ee647b6b90729ab34a250b1
+readonly CRASH_GLYPH=$'\U000f16a1'
+readonly dedupe_seconds=${OMARCHY_CRASH_DEDUPE_SECONDS:-60}
+readonly ignore_pattern=${OMARCHY_CRASH_IGNORE:-}
+readonly script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+declare -A last_notified
+
+announce() {
+  local pid=$1 comm=$2 exe=$3 signal=$4
+
+  omarchy-notification-wait || return 1
+  omarchy-notification-send \
+    --urgency critical \
+    --glyph "$CRASH_GLYPH" \
+    "Process crashed: $comm" \
+    "Left-click diagnose · Right-click dismiss." \
+    --exec "$script_dir/codex-crash-dispatch" "$pid" "$comm" "$exe" "$signal"
+}
+
+if [[ ${1:-} == --announce ]]; then
+  (($# == 5)) || {
+    echo "Usage: omarchy-crash-watch --announce <pid> <comm> <exe> <signal>" >&2
+    exit 1
+  }
+  announce "$2" "$3" "$4" "$5"
+  exit
+fi
+
+journalctl -f -n 0 -o json "MESSAGE_ID=$COREDUMP_MESSAGE_ID" 2>/dev/null |
+  while IFS= read -r entry; do
+    pid=$(jq -r '.COREDUMP_PID // empty' <<<"$entry")
+    comm=$(jq -r '.COREDUMP_COMM // empty' <<<"$entry")
+    exe=$(jq -r '.COREDUMP_EXE // empty' <<<"$entry")
+    signal=$(jq -r '.COREDUMP_SIGNAL_NAME // .COREDUMP_SIGNAL // empty' <<<"$entry")
+
+    [[ $pid =~ ^[0-9]+$ ]] || continue
+    [[ -n $comm ]] || comm=unknown
+    [[ -n $exe ]] || exe=unknown
+    [[ -n $signal ]] || signal=unknown
+    [[ -z $ignore_pattern || ! $comm =~ $ignore_pattern ]] || continue
+    [[ -n $(omarchy-default-agent) ]] || continue
+
+    now=${EPOCHSECONDS:-$(date +%s)}
+    key="$comm|$exe|$signal"
+    previous=${last_notified[$key]:-0}
+    ((now - previous >= dedupe_seconds)) || continue
+    last_notified[$key]=$now
+
+    announce "$pid" "$comm" "$exe" "$signal"
+  done

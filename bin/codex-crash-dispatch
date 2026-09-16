@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Decide at click time whether to show the Codex picker or use Omarchy's
+# standard crash diagnosis flow for the current default agent.
+
+set -euo pipefail
+
+pid=${1:-}
+[[ $pid =~ ^[0-9]+$ ]] || {
+  echo "Usage: codex-crash-dispatch <pid> [comm] [exe] [signal]" >&2
+  exit 1
+}
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+agent=$(omarchy-default-agent)
+
+if [[ $agent == codex ]]; then
+  if command -v codex >/dev/null; then
+    exec "$script_dir/codex-crash-diagnose" "$@"
+  fi
+  omarchy-notification-send \
+    --urgency critical \
+    "Codex crash diagnosis unavailable" \
+    "Codex is the default agent but its command is not installed."
+fi
+
+exec omarchy-agent-crash "$@"

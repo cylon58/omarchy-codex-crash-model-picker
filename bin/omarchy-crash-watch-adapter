@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# Persistent, fail-safe bridge from Omarchy's user service to this plugin.
+
+set -euo pipefail
+
+readonly plugin_id=io.github.cylon58.codex-crash-model-picker
+readonly shell_config=${OMARCHY_SHELL_CONFIG:-$HOME/.config/omarchy/shell.json}
+readonly plugin_watch=${OMARCHY_PLUGIN_CRASH_WATCH:-$HOME/.config/omarchy/plugins/$plugin_id/bin/omarchy-crash-watch}
+readonly stock_watch=${OMARCHY_STOCK_CRASH_WATCH:-/usr/bin/omarchy-crash-watch}
+
+if [[ -x $plugin_watch ]] && jq -e --arg id "$plugin_id" '
+  any(.plugins[]?;
+    (type == "object" and .id == $id)
+    or (type == "string" and . == $id))
+' "$shell_config" >/dev/null 2>&1; then
+  exec "$plugin_watch"
+fi
+
+exec "$stock_watch"

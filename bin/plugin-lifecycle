@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# Install or remove the user-level service bridge used by this plugin.
+
+set -euo pipefail
+
+action=${1:-}
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+project_dir=$(cd "$script_dir/.." && pwd)
+systemctl_bin=${SYSTEMCTL_BIN:-systemctl}
+adapter_target="$HOME/.local/bin/omarchy-crash-watch-plugin-adapter"
+override_target="$HOME/.config/systemd/user/omarchy-crash-watch.service.d/override.conf"
+
+reload_watcher() {
+  "$systemctl_bin" --user daemon-reload
+  "$systemctl_bin" --user restart omarchy-crash-watch.service
+}
+
+case $action in
+activate)
+  install -Dm755 "$script_dir/omarchy-crash-watch-adapter" "$adapter_target"
+  install -Dm644 "$project_dir/systemd/override.conf" "$override_target"
+  reload_watcher
+  ;;
+refresh)
+  if [[ -x $adapter_target && -f $override_target ]]; then
+    reload_watcher
+  fi
+  ;;
+uninstall)
+  rm -f -- "$adapter_target" "$override_target"
+  rmdir --ignore-fail-on-non-empty "$(dirname "$override_target")" 2>/dev/null || true
+  reload_watcher
+  ;;
+*)
+  echo "Usage: plugin-lifecycle <activate|refresh|uninstall>" >&2
+  exit 1
+  ;;
+esac
