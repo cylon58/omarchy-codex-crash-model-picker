@@ -9,7 +9,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 project_dir=$(cd "$script_dir/.." && pwd)
 systemctl_bin=${SYSTEMCTL_BIN:-systemctl}
 adapter_target="$HOME/.local/bin/omarchy-crash-watch-plugin-adapter"
-override_target="$HOME/.config/systemd/user/omarchy-crash-watch.service.d/override.conf"
+override_target="$HOME/.config/systemd/user/omarchy-crash-watch.service.d/zz-codex-crash-model-picker.conf"
 
 reload_watcher() {
   "$systemctl_bin" --user daemon-reload

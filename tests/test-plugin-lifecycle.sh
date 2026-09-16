@@ -50,17 +50,22 @@ OMARCHY_PLUGIN_CRASH_WATCH="$tmp/missing-watcher" "$adapter"
 
 # Activation installs only user-owned adapter/drop-in files and restarts the
 # watcher; uninstall removes both and restores the stock service definition.
+legacy_override="$tmp/home/.config/systemd/user/omarchy-crash-watch.service.d/override.conf"
+mkdir -p "$(dirname "$legacy_override")"
+printf '%s\n' '[Service]' '# unrelated user override' >"$legacy_override"
 HOME="$tmp/home" SYSTEMCTL_BIN="$tmp/bin/systemctl" "$lifecycle" activate
 installed_adapter="$tmp/home/.local/bin/omarchy-crash-watch-plugin-adapter"
-installed_override="$tmp/home/.config/systemd/user/omarchy-crash-watch.service.d/override.conf"
+installed_override="$tmp/home/.config/systemd/user/omarchy-crash-watch.service.d/zz-codex-crash-model-picker.conf"
 [[ -x $installed_adapter ]] || fail "activation did not install the adapter"
 [[ -f $installed_override ]] || fail "activation did not install the systemd drop-in"
 grep -Fx 'ExecStart=%h/.local/bin/omarchy-crash-watch-plugin-adapter' "$installed_override" >/dev/null || fail "drop-in uses the wrong command"
+grep -Fx '# unrelated user override' "$legacy_override" >/dev/null || fail "activation overwrote another user drop-in"
 grep -Fx -- '--user daemon-reload' "$TEST_SYSTEMCTL_LOG" >/dev/null || fail "activation did not reload user units"
 grep -Fx -- '--user restart omarchy-crash-watch.service' "$TEST_SYSTEMCTL_LOG" >/dev/null || fail "activation did not restart the watcher"
 
 HOME="$tmp/home" SYSTEMCTL_BIN="$tmp/bin/systemctl" "$lifecycle" uninstall
 [[ ! -e $installed_adapter ]] || fail "uninstall left the adapter installed"
 [[ ! -e $installed_override ]] || fail "uninstall left the drop-in installed"
+grep -Fx '# unrelated user override' "$legacy_override" >/dev/null || fail "uninstall removed another user drop-in"
 
 printf 'PASS: plugin lifecycle and safe fallback behavior\n'

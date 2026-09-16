@@ -46,7 +46,7 @@ It invokes `journalctl`, `coredumpctl`, `jq`, `gum`, `codex`,
 Enabling the plugin writes two user-owned integration files:
 
 - `~/.local/bin/omarchy-crash-watch-plugin-adapter`
-- `~/.config/systemd/user/omarchy-crash-watch.service.d/override.conf`
+- `~/.config/systemd/user/omarchy-crash-watch.service.d/zz-codex-crash-model-picker.conf`
 
 The adapter fails safely: when this plugin is disabled or absent, it executes
 Omarchy's packaged `/usr/bin/omarchy-crash-watch`.
