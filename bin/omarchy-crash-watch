@@ -9,10 +9,13 @@ readonly CRASH_GLYPH=$'\U000f16a1'
 readonly dedupe_seconds=${OMARCHY_CRASH_DEDUPE_SECONDS:-60}
 readonly ignore_pattern=${OMARCHY_CRASH_IGNORE:-}
 readonly script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "$script_dir/crash-common.sh"
 declare -A last_notified
 
 announce() {
-  local pid=$1 comm=$2 exe=$3 signal=$4
+  local pid=$1 comm=${2:-unknown}
+  crash_valid_pid "$pid" || return 1
+  jq -en --arg name "$comm" '$name | explode | all(. >= 32 and (. < 127 or . > 159))' >/dev/null || return 1
 
   omarchy-notification-wait || return 1
   omarchy-notification-send \
@@ -20,37 +23,42 @@ announce() {
     --glyph "$CRASH_GLYPH" \
     "Process crashed: $comm" \
     "Left-click diagnose · Right-click dismiss." \
-    --exec "$script_dir/codex-crash-dispatch" "$pid" "$comm" "$exe" "$signal"
+    --exec "$script_dir/codex-crash-dispatch" "$pid"
 }
 
 if [[ ${1:-} == --announce ]]; then
-  (($# == 5)) || {
-    echo "Usage: omarchy-crash-watch --announce <pid> <comm> <exe> <signal>" >&2
+  (($# >= 2)) || {
+    echo "Usage: omarchy-crash-watch --announce <pid> [comm]" >&2
     exit 1
   }
-  announce "$2" "$3" "$4" "$5"
-  exit
+  announce "$2" "${3:-unknown}"
+  exit $?
 fi
 
 journalctl -f -n 0 -o json "MESSAGE_ID=$COREDUMP_MESSAGE_ID" 2>/dev/null |
   while IFS= read -r entry; do
-    pid=$(jq -r '.COREDUMP_PID // empty' <<<"$entry")
-    comm=$(jq -r '.COREDUMP_COMM // empty' <<<"$entry")
-    exe=$(jq -r '.COREDUMP_EXE // empty' <<<"$entry")
-    signal=$(jq -r '.COREDUMP_SIGNAL_NAME // .COREDUMP_SIGNAL // empty' <<<"$entry")
-
-    [[ $pid =~ ^[0-9]+$ ]] || continue
-    [[ -n $comm ]] || comm=unknown
-    [[ -n $exe ]] || exe=unknown
-    [[ -n $signal ]] || signal=unknown
+    # Validate JSON strings before shell decoding can discard NULs or trailing
+    # newlines. Journal binary-field arrays are not safe display strings.
+    fields=$(jq -er '
+      select(type == "object") |
+      {pid: .COREDUMP_PID, comm: (if has("COREDUMP_COMM") then .COREDUMP_COMM else "unknown" end)} |
+      select(.pid | type == "string") |
+      select(.pid | test("^[1-9][0-9]{0,9}$")) |
+      select(.pid | explode | all(. >= 48 and . <= 57)) |
+      select(.comm | type == "string") |
+      select(.comm | explode | all(. >= 32 and (. < 127 or . > 159))) |
+      [.pid, (if .comm == "" then "unknown" else .comm end)] | join("\t")
+    ' <<<"$entry" 2>/dev/null) || continue
+    IFS=$'\t' read -r pid comm <<<"$fields"
+    crash_valid_pid "$pid" || continue
     [[ -z $ignore_pattern || ! $comm =~ $ignore_pattern ]] || continue
     [[ -n $(omarchy-default-agent) ]] || continue
 
     now=${EPOCHSECONDS:-$(date +%s)}
-    key="$comm|$exe|$signal"
+    key="$comm"
     previous=${last_notified[$key]:-0}
     ((now - previous >= dedupe_seconds)) || continue
     last_notified[$key]=$now
 
-    announce "$pid" "$comm" "$exe" "$signal"
+    announce "$pid" "$comm"
   done

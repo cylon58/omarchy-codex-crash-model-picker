@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.cylon58.codex-crash-model-picker",
   "name": "Codex Crash Diagnostic Model Picker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "cylon58",
   "license": "MIT",
   "description": "Choose a Codex model and reasoning level before diagnosing an Omarchy process crash.",

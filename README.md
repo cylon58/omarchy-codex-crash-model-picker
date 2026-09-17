@@ -7,7 +7,8 @@ Crash notifications say **“Left-click diagnose · Right-click dismiss.”** Th
 notification action checks your default agent when you click it:
 
 - Codex opens a terminal picker for the model and then the reasoning level.
-- Any other Omarchy agent uses the standard `omarchy-agent-crash` flow.
+- Any other Omarchy agent uses the standard `omarchy-agent` launcher with the
+  same PID-only diagnosis prompt.
 - Changing the default agent after a notification appears is respected.
 - If Codex is selected but unavailable, the plugin reports that clearly before
   handing control to Omarchy's standard diagnosis path.
@@ -35,13 +36,31 @@ either picker cancels the diagnosis.
 - Omarchy Quattro with crash capture enabled
 - `systemd-coredump`, `jq`, and `gum` (included by Omarchy)
 - Codex CLI for the Codex-specific picker
-- Any non-Codex default agent continues to use Omarchy's normal crash workflow
+- Any non-Codex default agent continues to use Omarchy's normal agent launcher
+
+## Crash metadata safety
+
+Only a validated positive numeric PID is passed by the notification action and
+included as crash data in the initial agent prompt. Process names, executable
+paths, signals, and timestamps are never interpolated into that prompt. Legacy
+metadata arguments from older notifications are ignored.
+
+The diagnosis prompt directs the agent to retrieve metadata with `coredumpctl`
+and treat all crash and journal contents as untrusted evidence, never as
+instructions or approval. Diagnosis is requested to remain read-only.
+
+Process names are used only for notification display, ignore matching, and
+deduplication. Events containing control characters (U+0000–U+001F or
+U+007F–U+009F) or non-string process names are rejected before shell decoding.
+Notifications for the same process name are deduplicated during the configured
+interval. This closes the initial-prompt injection path; it does not make agent
+interpretation of subsequently retrieved evidence a security boundary.
 
 ## Files and commands used
 
 The plugin reads systemd-coredump events and the current Omarchy default agent.
 It invokes `journalctl`, `coredumpctl`, `jq`, `gum`, `codex`,
-`omarchy-agent-crash`, `omarchy-notification-send`, and `systemctl --user`.
+`omarchy-agent`, `omarchy-notification-send`, and `systemctl --user`.
 
 Enabling the plugin writes two user-owned integration files:
 
@@ -82,8 +101,9 @@ systemctl --user restart omarchy-crash-watch.service
 ```sh
 omarchy plugin validate .
 tests/test-crash-picker.sh
+python3 tests/test-crash-security.py
 tests/test-plugin-lifecycle.sh
-bash -n bin/* tests/*.sh
+for script in bin/* tests/*.sh; do bash -n "$script" || exit; done
 ```
 
 ## License

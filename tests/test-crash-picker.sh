@@ -60,7 +60,7 @@ EOF
 printf '%s\n' "${TEST_DEFAULT_AGENT:-codex}"
 EOF
 
-  cat >"$bin_dir/omarchy-agent-crash" <<'EOF'
+  cat >"$bin_dir/omarchy-agent" <<'EOF'
 #!/bin/bash
 printf '%s\0' "$@" >"$TEST_GENERIC_ARGS"
 EOF
@@ -84,18 +84,21 @@ run_picker_test() {
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
+mkdir -p "$tmp/codex"
+printf '%s\n' 'model = "gpt-5.6-sol"' >"$tmp/codex/config.toml"
+export CODEX_HOME="$tmp/codex"
 make_fake_commands "$tmp/bin"
 run_picker_test "$tmp"
 
 # A model and reasoning selection must reach Codex as explicit overrides, while
-# retaining the crash details in the prompt.
+# retaining only the validated crash PID in the prompt.
 printf '%s\n' 'GPT-5.6 Terra — balanced' 'medium' >"$TEST_GUM_SELECTIONS"
 "$picker" --terminal 2337144 chromium /usr/lib/chromium/chromium SIGILL
 mapfile -d '' -t codex_args <"$TEST_CODEX_ARGS"
 [[ ${codex_args[*]} == *'--model gpt-5.6-terra'* ]] || fail "Codex did not receive the selected model"
 [[ ${codex_args[*]} == *'model_reasoning_effort="medium"'* ]] || fail "Codex did not receive the selected reasoning level"
-[[ ${codex_args[*]} == *'PID:      2337144'* ]] || fail "Codex prompt omitted the PID"
-[[ ${codex_args[*]} == *'process:  chromium'* ]] || fail "Codex prompt omitted the process"
+[[ ${codex_args[*]} == *'PID: 2337144'* ]] || fail "Codex prompt omitted the PID"
+[[ ${codex_args[*]} != *chromium* ]] || fail "Codex prompt contains crash metadata"
 
 # Astra must not offer the unsupported `none` level.
 : >"$TEST_GUM_INPUT"
@@ -128,10 +131,10 @@ mapfile -d '' -t launch_args <"$TEST_LAUNCH_ARGS"
 mapfile -d '' -t notification_args <"$TEST_NOTIFICATION_ARGS"
 [[ ${notification_args[*]} == *'Left-click diagnose · Right-click dismiss.'* ]] || fail "notification lacks dismissal guidance"
 expected_dispatcher="$project_dir/bin/codex-crash-dispatch"
-[[ ${notification_args[*]} == *"--exec $expected_dispatcher 2337144 chromium /usr/lib/chromium/chromium SIGILL"* ]] || fail "notification does not launch the click-time dispatcher"
+[[ ${notification_args[*]} == *"--exec $expected_dispatcher 2337144" ]] || fail "notification does not launch the dispatcher with only a PID"
 
 # The dispatcher checks the default at click time: Codex gets the picker, while
-# another agent retains Omarchy's generic diagnosis path.
+# another agent uses Omarchy's generic launcher with the same safe prompt.
 rm -f "$TEST_LAUNCH_ARGS" "$TEST_GENERIC_ARGS"
 TEST_DEFAULT_AGENT=codex "$dispatcher" 2337144 chromium /usr/lib/chromium/chromium SIGILL
 [[ -e $TEST_LAUNCH_ARGS ]] || fail "Codex default did not open the model picker"
@@ -140,7 +143,8 @@ TEST_DEFAULT_AGENT=codex "$dispatcher" 2337144 chromium /usr/lib/chromium/chromi
 rm -f "$TEST_LAUNCH_ARGS" "$TEST_GENERIC_ARGS"
 TEST_DEFAULT_AGENT=claude "$dispatcher" 2337144 chromium /usr/lib/chromium/chromium SIGILL
 mapfile -d '' -t generic_args <"$TEST_GENERIC_ARGS"
-[[ ${generic_args[*]} == *'2337144 chromium /usr/lib/chromium/chromium SIGILL'* ]] || fail "non-Codex agent did not retain the generic diagnosis path"
+[[ ${generic_args[0]} == --prompt && ${generic_args[1]} == *'PID: 2337144'* ]] || fail "non-Codex agent did not receive the diagnosis prompt"
+[[ ${generic_args[*]} != *chromium* ]] || fail "non-Codex prompt contains crash metadata"
 [[ ! -e $TEST_LAUNCH_ARGS ]] || fail "non-Codex default incorrectly opened the Codex picker"
 
 printf 'PASS: crash notification and Codex picker behavior\n'
